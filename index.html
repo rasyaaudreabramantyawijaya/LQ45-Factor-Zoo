@@ -3,94 +3,42 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#07111f">
-  <meta name="description" content="An interactive, evidence-aware IDX Factor Zoo demonstration. All issuer metrics are synthetic examples.">
-  <title>IDX Factor Zoo — Interactive Demo</title>
+  <meta name="theme-color" content="#090a0e">
+  <meta name="description" content="Standalone 3D factor map for an offline LQ45 issuer snapshot.">
+  <title>LQ45 Factor Zoo</title>
   <link rel="stylesheet" href="src/styles.css">
 </head>
 <body>
-  <div class="app-shell">
-    <header class="topbar">
-      <a class="brand" href="#top" aria-label="IDX Factor Zoo home">
-        <span class="brand-mark" aria-hidden="true">FZ</span>
-        <span><strong>IDX Factor Zoo</strong><small>Research sandbox</small></span>
-      </a>
-      <div class="topbar-right">
-        <span class="offline-pill"><i></i> Offline demo</span>
-        <a class="top-link" href="https://github.com/rasyaaudreabramantyawijaya/IDX-Evidence-Lab" target="_blank" rel="noreferrer">Source project <span aria-hidden="true">↗</span></a>
+  <main class="factor-zoo">
+    <section class="chart-section" aria-label="LQ45 3D factor map">
+      <div class="chart-frame">
+        <canvas id="factor-zoo-canvas" tabindex="0" role="img" aria-label="LQ45 3D factor scatter: Value from earnings and dividend yield on X, Momentum from 12-to-1 return and distance from SMA200 on Y, Quality from ROE and inverse debt-to-equity on Z, and Low Volatility from inverse beta and residual volatility as color. Hover over an issuer to inspect raw inputs, component z-scores, peer counts, and factor scores."></canvas>
+        <aside class="colorbar" aria-label="Low Volatility score, MATLAB-style Parula scale from minus three to plus three">
+          <i class="colorbar-gradient" aria-hidden="true"></i>
+          <div class="colorbar-ticks" aria-hidden="true"><span>+3</span><span>+2</span><span>+1</span><span>0</span><span>−1</span><span>−2</span><span>−3</span></div>
+          <span class="colorbar-label">Low Volatility</span>
+        </aside>
+        <div class="tooltip" role="status" aria-live="polite" hidden></div>
+        <div id="load-state" class="load-state" hidden></div>
       </div>
-    </header>
+      <div class="axis-notes">
+        <span>X · Value · earnings yield + dividend yield</span>
+        <span>Y · Momentum · 12–1 return + close / SMA200 − 1</span>
+        <span>Z · Quality · ROE + inverse debt-to-equity (DER)</span>
+        <span>Color · Low Volatility · inverse IHSG beta + inverse residual volatility</span>
+        <span>Hover a point for raw inputs, component z-scores, peer counts, and the factor-score calculation.</span>
+      </div>
+    </section>
 
-    <main id="top" class="main-content">
-      <section class="intro-row">
-        <div>
-          <p class="eyebrow">FACTOR RESEARCH · IDX EXAMPLES</p>
-          <h1>Explore issuer characteristics<br><span>through four factor lenses.</span></h1>
-          <p class="intro-copy">Compare value, quality, momentum and low-volatility characteristics in a small, illustrative universe. Select a point to inspect its inputs and score construction.</p>
-        </div>
-        <div class="snapshot-card"><span class="snapshot-icon">◷</span><div><small>Data mode</small><strong>Synthetic example</strong><span>No live market connection</span></div></div>
-      </section>
-
-      <section class="notice" role="note">
-        <span class="notice-icon" aria-hidden="true">!</span>
-        <div><strong>Illustrative data only</strong><p>Tickers are real examples; every financial input and factor score in this demo is synthetic and must not be treated as observed issuer data, a forecast, an alpha signal, or investment advice.</p></div>
-      </section>
-
-      <section class="stats-grid" aria-label="Demo overview">
-        <article class="stat-card"><span>Example issuers</span><strong id="issuer-count">—</strong><small>Curated demo universe</small></article>
-        <article class="stat-card"><span>Factor dimensions</span><strong>04</strong><small>Value · Quality · Momentum · Low Vol</small></article>
-        <article class="stat-card"><span>Peer groups</span><strong>02</strong><small>Financial · Non-financial</small></article>
-        <article class="stat-card"><span>Data connection</span><strong class="status-local"><i></i> Local</strong><small>Static JSON · no API calls</small></article>
-      </section>
-
-      <section class="workspace-card">
-        <div class="section-heading">
-          <div><p class="eyebrow">CROSS-SECTIONAL MAP</p><h2>Factor space</h2><p>Drag to rotate · scroll to zoom · hover or click an issuer</p></div>
-          <div class="chart-actions"><button type="button" class="ghost-button" id="reset-view">Reset view</button><div class="view-toggle" role="tablist" aria-label="Data view"><button class="active" id="scatter-tab" role="tab" aria-selected="true">Scatter</button><button id="table-tab" role="tab" aria-selected="false">Scorecard</button></div></div>
-        </div>
-
-        <div class="toolbar">
-          <label class="search-box"><span aria-hidden="true">⌕</span><input id="issuer-search" type="search" placeholder="Find ticker or company" autocomplete="off"></label>
-          <label class="select-field">Peer group<select id="group-filter"><option value="all">All example issuers</option><option value="Financial">Financial</option><option value="Non-financial">Non-financial</option></select></label>
-          <label class="select-field">X axis<select id="axis-x"><option value="value">Value</option><option value="quality">Quality</option><option value="momentum" selected>Momentum</option><option value="lowVol">Low Vol</option></select></label>
-          <label class="select-field">Y axis<select id="axis-y"><option value="value" selected>Value</option><option value="quality">Quality</option><option value="momentum">Momentum</option><option value="lowVol">Low Vol</option></select></label>
-          <label class="select-field">Depth<select id="axis-z"><option value="value">Value</option><option value="quality" selected>Quality</option><option value="momentum">Momentum</option><option value="lowVol">Low Vol</option></select></label>
-        </div>
-
-        <div class="chart-layout" id="scatter-view">
-          <div class="plot-wrap">
-            <canvas id="factor-chart" aria-label="Interactive 3D factor scatter plot. Drag to rotate, scroll to zoom, hover or click points for issuer detail. Use arrow keys to rotate." role="img" tabindex="0" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Enter"></canvas>
-            <div class="plot-hint"><span class="hint-dot"></span> Synthetic scores · standardized by cross-section</div>
-          </div>
-          <aside class="issuer-panel" id="issuer-panel" aria-live="polite">
-            <div class="empty-selection"><span class="empty-glyph">◎</span><h3>Select an issuer</h3><p>Hover or click a point in the chart, or select a ticker from the scorecard.</p></div>
-          </aside>
-        </div>
-
-        <div class="score-table-wrap hidden" id="scorecard-view">
-          <table class="score-table">
-            <thead><tr><th scope="col">Issuer</th><th scope="col">Peer group</th><th scope="col">Value</th><th scope="col">Quality</th><th scope="col">Momentum</th><th scope="col">Low Vol</th></tr></thead>
-            <tbody id="score-rows"></tbody>
-          </table>
-        </div>
-        <div class="chart-footer"><span><i class="legend-dot teal"></i> Higher relative score</span><span><i class="legend-dot blue"></i> Near peer average</span><span><i class="legend-dot rose"></i> Lower relative score</span><span class="footer-note">Score direction is descriptive, not a recommendation.</span></div>
-      </section>
-
-      <section class="method-grid">
-        <article class="method-card"><div class="method-title"><span class="factor-icon value-icon">V</span><div><h3>Value</h3><small>Price paid for fundamentals</small></div></div><p>Combines earnings yield with trailing dividend yield. Higher values indicate higher yields relative to the example cross-section.</p><div class="formula">Earnings yield + dividend yield</div></article>
-        <article class="method-card"><div class="method-title"><span class="factor-icon quality-icon">Q</span><div><h3>Quality</h3><small>Profitability and leverage</small></div></div><p>Combines return on equity with inverse debt-to-equity. The demo standardizes financial and non-financial peers separately.</p><div class="formula">ROE + inverse debt-to-equity</div></article>
-        <article class="method-card"><div class="method-title"><span class="factor-icon momentum-icon">M</span><div><h3>Momentum</h3><small>Price trend characteristics</small></div></div><p>Combines a 12-to-1-month price momentum measure with the price distance from its 200-session average.</p><div class="formula">12–1 return + close / SMA200 − 1</div></article>
-        <article class="method-card"><div class="method-title"><span class="factor-icon lowvol-icon">L</span><div><h3>Low Volatility</h3><small>Market and residual risk</small></div></div><p>Combines inverse market beta with inverse residual volatility from a market-model regression.</p><div class="formula">Inverse beta + inverse residual volatility</div></article>
-      </section>
-
-      <section class="method-notes">
-        <div><p class="eyebrow">HOW THE DEMO SCORES WORK</p><h2>Comparable inputs, visible assumptions.</h2></div>
-        <div class="notes-copy"><p>For each input, values are winsorized at the cross-sectional 5th and 95th percentiles, converted to population z-scores, and clipped to the range −3 to +3. Inputs that are naturally lower-is-better are direction-reversed before scoring. Each factor score is the mean of its available component z-scores; missing values are not replaced with zero. At least five usable peers are required for a component score.</p><p>In this demo, those operations are applied to generated numbers only. Beta and residual-volatility values here are synthetic inputs; this demo does not run the OLS regression. A production study would also need point-in-time financial reports, corporate-action-adjusted prices, delisted issuers, a consistent IDX universe, source provenance, and out-of-sample evaluation.</p></div>
-      </section>
-
-      <footer class="site-footer"><a class="brand footer-brand" href="#top"><span class="brand-mark" aria-hidden="true">FZ</span><span><strong>IDX Factor Zoo</strong><small>Independent educational demo</small></span></a><p>Method reference: IDX Evidence Lab Factor Zoo · implementation and demo inputs here are standalone and synthetic.</p><a href="https://github.com/rasyaaudreabramantyawijaya/IDX-Evidence-Lab/blob/main/src/idx_evidence_lab/portfolio/portfolio_factors.py" target="_blank" rel="noreferrer">View source methodology ↗</a></footer>
-    </main>
-  </div>
+    <section class="leaderboard-section" aria-labelledby="leaderboard-title">
+      <div class="leaderboard-heading">
+        <h2 id="leaderboard-title">LQ45 factor score leaders</h2>
+        <span class="sub">Top 5 · complete scores only</span>
+      </div>
+      <div id="leaderboards" class="leaderboards"></div>
+      <p class="leaderboard-note">Partial scores are excluded. Scores show relative positions in this snapshot; they are not return probabilities or switching instructions.</p>
+    </section>
+  </main>
   <script src="src/factor-zoo.js" defer></script>
 </body>
 </html>

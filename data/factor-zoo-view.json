@@ -1,0 +1,8 @@
+{
+  "schema_version": "portfolio-factor-zoo.v1",
+  "status": "WAITING_FOR_MATLAB",
+  "azimuth": -37.5,
+  "elevation": 28.0,
+  "updated_at_utc": null,
+  "artifact_fingerprint": "dfc556b4c2665cd6d3c72989719e50dcae8f768f27f4a0ff5764b6644e63475e"
+}

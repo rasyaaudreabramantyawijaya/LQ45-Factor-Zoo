@@ -1,76 +1,82 @@
-# IDX Factor Zoo
+# LQ45 Factor Zoo
 
-An independent, standalone educational demo of a four-factor research view for selected IDX issuers. It separates the Factor Zoo concept from the larger IDX Evidence Lab application and offers a small interactive example that runs locally in a browser.
+A focused, standalone reproduction of the **LQ45 Factor Zoo 3D scatter plot** from [IDX Evidence Lab](https://github.com/rasyaaudreabramantyawijaya/IDX-Evidence-Lab). The project keeps the original visualization's four factor characteristics, point-level evidence, and factor leaderboards in one view. It does not reproduce the Evidence Lab dashboard or other workspaces.
 
-> **Synthetic data notice:** the ticker names are examples, but every numeric input and score shown in the interactive demo is generated synthetic data. Nothing here is a current issuer metric, forecast, validated alpha, portfolio recommendation, or investment advice.
+> **Snapshot and interpretation:** this demo reads a compact local snapshot with an IHSG reference date of **2026-09-24** and company-report data dated **2026-09-25**. It does not fetch or refresh market data. Factor scores are relative, descriptive characteristics for the included current-universe snapshot; they are not forecasts, return probabilities, investment recommendations, or evidence of factor performance.
 
-<a href="https://rasyaaudreabramantyawijaya.github.io/IDX-Factor-Zoo/"><img src="assets/factor-zoo-preview.png" alt="Preview of the IDX Factor Zoo interactive dashboard. Click to open the live interactive demonstration." width="100%"></a>
+![LQ45 Factor Zoo standalone 3D scatter plot and factor score leaderboards](assets/factor-zoo-preview.png)
 
-[Open the interactive demo](https://rasyaaudreabramantyawijaya.github.io/IDX-Factor-Zoo/) · [View the source repository](https://github.com/rasyaaudreabramantyawijaya/IDX-Factor-Zoo)
+[Open the interactive demo](https://rasyaaudreabramantyawijaya.github.io/LQ45-Factor-Zoo/)
 
-## What the demo shows
+## What the visualization shows
 
-The interactive scatter plot places issuers in a three-dimensional factor space. Drag the plot to rotate it, scroll to zoom, and hover or click points to inspect a ticker's raw example inputs and standardized scores. Use the controls to change factor axes, search issuers, and filter by peer group. The Scorecard tab displays the same calculated scores in a selectable table.
+Each plotted point represents one LQ45 issuer. Its 3D position and color encode four cross-sectional factor scores:
 
-The example universe includes BBCA, BBRI, BMRI, BBNI, BBTN, TLKM, ASII, ADRO, ANTM, and ICBP. Numeric values for all ten are fictional. The sample intentionally uses five financial and five non-financial examples so peer-group standardization can be illustrated.
+- **X — Value:** earnings yield and dividend yield. Higher component values contribute to a higher relative Value score.
+- **Y — Momentum:** 12–1-month price return and price relative to the 200-session simple moving average.
+- **Z — Quality:** return on equity and inverse debt-to-equity. Financial and non-financial issuers use separate Quality peer groups.
+- **Color — Low Volatility:** inverse IHSG beta and inverse residual volatility. The MATLAB-style Parula scale maps higher relative scores toward yellow and lower scores toward purple.
 
-## Factor definitions
+The page opens directly on the 3D visualization without a title bar or control buttons. Drag the plot to rotate it, scroll to zoom, and hover over a point to reveal its ticker, sector, exact factor scores, raw input values, component z-scores, eligible peer counts, reference dates, price coverage, and subsector. The hover also shows how the displayed score is composed, including the direction reversal for debt-to-equity, beta, and residual volatility. A point crosshair projects the selected issuer onto the axes. Use the arrow keys while the chart is focused to rotate the camera; reload the page to restore its initial view. The four leaderboard cards show the five highest **complete** scores for Value, Quality, Momentum, and Low Volatility; partial scores are excluded. Hover the corresponding point to inspect the inputs behind a leaderboard entry.
 
-| Factor | Components in this demo | Direction |
-| --- | --- | --- |
-| Value | Earnings yield (1 / verified positive forward P/E in the source model) and trailing dividend yield | Higher yield scores higher |
-| Quality | Return on equity and inverse debt-to-equity | Higher ROE and lower leverage score higher |
-| Momentum | 12-to-1-month price return and price distance from SMA200 | Stronger trailing trend scores higher |
-| Low Volatility | Inverse market beta and inverse residual volatility from an OLS market model versus IHSG | Lower estimated sensitivity and residual volatility score higher |
+## Scoring method
 
-### Scoring outline
+The plot reproduces the Factor Zoo's descriptive, cross-sectional scoring method:
 
-1. For each component, take the eligible issuer cross-section and winsorize observations at its 5th and 95th percentiles.
-2. Reverse the component sign where lower raw values are preferable (debt-to-equity, beta, and residual volatility).
-3. Convert the clipped component to a population z-score, using the cross-sectional mean and population standard deviation, then clip the score to the range −3 to +3.
-4. Standardize financial and non-financial quality inputs within their respective peer groups. Other components use the eligible selected cross-section.
-5. Compute each factor as the arithmetic mean of its available component z-scores. Missing component values remain missing rather than becoming zero. A component needs at least five eligible peers.
+1. Score each available component across its eligible peer set. At least five valid peers are required. Value, Momentum, and Low Volatility use eligible issuers in the snapshot; Quality is standardized separately within the financial and non-financial peer groups.
+2. Winsorize component values at the 5th and 95th percentiles.
+3. Calculate a population z-score and clip it to the range −3 to +3. Reverse the direction for debt-to-equity, beta, and residual volatility so that lower values receive higher relative scores.
+4. Combine available component scores using their arithmetic mean. The compact data dump includes every component's raw value, standardized z-score, and eligible peer count, so each displayed factor score can be recomposed and checked. A factor is `AVAILABLE` only when all of its components are available; otherwise it is `PARTIAL` or `UNAVAILABLE`.
 
-This is a concise educational reconstruction of the source project's factor methodology, with a fresh standalone implementation and synthetic demo inputs. The real source implementation requires at least 126 aligned daily returns to estimate beta and residual volatility; this static demo does not calculate those values from return series. It is not the original app module transplanted verbatim. The original source project may evolve independently.
+Momentum uses the 12–1 return (`close[t−21] / close[t−252] − 1`) and the latest close relative to the simple moving average of the latest 200 closes. Beta and residual volatility are estimated from issuer returns aligned to IHSG returns; at least 126 aligned daily returns are required. Quality component scores are standardized separately within financial and non-financial peer groups.
 
-## Model and interpretation
+## Demo data and provenance
 
-This is a **cross-sectional factor-characteristics model**, not a forecasting or optimization model. It describes the relative position of example issuers on selected characteristics. It does not estimate future returns, demonstrate factor premia, produce a buy/sell signal, infer beneficial ownership, or allocate capital. The label “Factor Zoo” refers to the grouped factor dimensions in the research view; this demo implements four composite characteristics rather than a comprehensive academic zoo of hundreds of factors.
+[`data/demo-universe.json`](data/demo-universe.json) is a reduced export of the locally available Factor Zoo snapshot for **45 current LQ45 issuers**. It retains issuer names, factor scores, each factor component's raw input, component z-score and eligible peer count, component/factor availability, peer group, reference dates, and daily-coverage metadata required for this visualization. It omits raw daily OHLCV histories, company-report files, and source filesystem paths. The chart has **35 plotted issuers** with all three axis scores available; each leaderboard is ranked only among issuers with a complete score for that factor.
 
-A defensible empirical study would require point-in-time financial statement availability, corporate-action-adjusted price histories, a historical IDX membership universe including delisted issuers, treatment of suspensions and stale reports, consistent sector/industry peer groups, explicit rebalancing and trading costs, and time-ordered out-of-sample tests. No such market-data analysis or performance test is included here.
+The source artifact marks its universe metadata `PARTIAL` because the universe snapshot hash is missing or mismatched. Coverage also varies by issuer and factor. This demo uses current snapshot membership; it does not reconstruct historical IDX/LQ45 membership, delisted issuers, or point-in-time constituent changes. Missing factor inputs remain missing and are never replaced with zero.
+
+The reduced export was derived from local source artifact fingerprint `007f24fe3c254a7080a2d26b540a163f6b685ae2b02d761ecd4ed636910940af`. The source project remains separate and unchanged. Relevant source implementation and artifact:
+
+- [`portfolio_factors.py`](https://github.com/rasyaaudreabramantyawijaya/IDX-Evidence-Lab/blob/main/src/idx_evidence_lab/portfolio/portfolio_factors.py) — factor inputs, cross-sectional scoring, and coverage rules.
+- [`130-portfolio-lab-factor-zoo.js`](https://github.com/rasyaaudreabramantyawijaya/IDX-Evidence-Lab/blob/main/frontend/legacy/scripts/130-portfolio-lab-factor-zoo.js) — source visualization behavior.
+- [`portfolio-factor-zoo-data.json`](https://github.com/rasyaaudreabramantyawijaya/IDX-Evidence-Lab/blob/main/docs/prototypes/portfolio-factor-zoo-data.json) — source data artifact.
+
+## MATLAB camera synchronization
+
+The MATLAB app is an optional local camera controller for the web plot. Run the page through a local HTTP server and open it with the query parameter `?follow=matlab` (for example, `http://127.0.0.1:8000/?follow=matlab`), then start `matlab/factor_zoo_camera_sync.m` from MATLAB. Moving its azimuth and elevation sliders updates the browser camera. The handoff file includes the data fingerprint; the browser ignores a view generated for a different snapshot. MATLAB must be installed to use this feature. The hosted static demo does not have access to a local MATLAB session or local camera-state file.
 
 ## Run locally
 
-No build step, package manager, API key, server, database, or internet connection is needed after cloning. Open `index.html` in a modern browser, or serve the folder with any static file server:
+The visualization is static HTML, CSS, JavaScript, and JSON. Python is only used as a local file server; no package installation, API key, database, market-data request, or build step is required.
 
 ```bash
+git clone https://github.com/rasyaaudreabramantyawijaya/LQ45-Factor-Zoo.git
+cd LQ45-Factor-Zoo
 python3 -m http.server 8000
 ```
 
-Then open `http://127.0.0.1:8000`.
+Open <http://127.0.0.1:8000>. Keep the server running while using the demo. Opening `index.html` through a `file://` URL may prevent the browser from loading the JSON data files.
 
-## Provenance and attribution
+### Start the MATLAB camera controller
 
-The four-factor design and associated source methodology are based on the Factor Zoo work in [IDX Evidence Lab](https://github.com/rasyaaudreabramantyawijaya/IDX-Evidence-Lab), particularly:
+In MATLAB, set the current folder to the repository root, then run:
 
-- [`portfolio_factors.py`](https://github.com/rasyaaudreabramantyawijaya/IDX-Evidence-Lab/blob/main/src/idx_evidence_lab/portfolio/portfolio_factors.py) — factor scoring methodology.
-- [`130-portfolio-lab-factor-zoo.js`](https://github.com/rasyaaudreabramantyawijaya/IDX-Evidence-Lab/blob/main/frontend/legacy/scripts/130-portfolio-lab-factor-zoo.js) — source-project visualization behavior.
-- [`portfolio-factor-zoo-data.json`](https://github.com/rasyaaudreabramantyawijaya/IDX-Evidence-Lab/blob/main/docs/prototypes/portfolio-factor-zoo-data.json) — source-project demo-data artifact and its coverage status.
-
-The source snapshot inspected for this independent demo was commit `0d8b3c99cc2a4bf54857e790a22152561a8121b6`. The linked source project's local snapshot reported momentum coverage but marked Value, Quality, and Low Volatility unavailable; therefore those source values were not reused here. This standalone demo uses visibly labeled synthetic examples instead. The upstream repository contained no root license file in the inspected snapshot; this repository therefore links and attributes the methodology but does not copy the upstream implementation code.
+```matlab
+addpath('matlab');
+factor_zoo_camera_sync
+```
 
 ## Project files
 
-- `index.html` — standalone interface.
-- `src/factor-zoo.js` — scoring, chart interactions, and issuer detail rendering.
-- `src/styles.css` — responsive visual design.
-- `data/demo-universe.json` — clearly labeled synthetic example inputs.
-- `assets/factor-zoo-preview.png` — browser capture of the demo linked to its interactive hosted version.
+- `index.html` — standalone plot, color scale, factor notes, and leaderboard structure.
+- `src/factor-zoo.js` — 3D projection, rotation, zoom, hover crosshair, point details, and leaderboard rendering.
+- `src/styles.css` — responsive styling for the plot and compact factor score cards.
+- `data/demo-universe.json` — reduced, offline LQ45 factor snapshot.
+- `data/factor-zoo-view.json` — local browser/MATLAB camera handoff state.
+- `matlab/factor_zoo_camera_sync.m` — MATLAB azimuth/elevation controls.
+- `assets/factor-zoo-preview.png` — README preview of the standalone demo.
 
-## Limitations
+## Boundaries
 
-- Static demo universe with ten selected IDX ticker examples; it is not a full IDX universe.
-- Synthetic observations only; no historical price or financial-report data are bundled.
-- No live data provider, API, authentication, persistence, database, forecast, or portfolio optimizer.
-- A z-score expresses relative rank in the selected peer cross-section and depends on peer membership and data quality.
-- This project is educational research software and not financial advice.
+This repository is a visualization demo, not a live-data service, backtest, portfolio optimizer, or trading system. A valid empirical factor study would require verified point-in-time universe membership, historically available fundamentals, delisted issuers, explicit rebalancing rules, transaction costs, and chronological out-of-sample evaluation. No investment decision should be inferred from the relative positions or leaderboard rankings shown here.

@@ -1,503 +1,421 @@
 (function () {
   'use strict';
 
-  var FACTORS = {
-    value: { label: 'Value', components: ['earningsYield', 'dividendYield'] },
-    quality: { label: 'Quality', components: ['roe', 'debtToEquity'] },
-    momentum: { label: 'Momentum', components: ['momentum12_1', 'aboveSma200'] },
-    lowVol: { label: 'Low Vol', components: ['beta', 'residualVolatility'] }
+  const ROOT = new URL('../', document.currentScript.src);
+  const DATA_URL = new URL('data/demo-universe.json', ROOT);
+  const MATLAB_VIEW_URL = new URL('data/factor-zoo-view.json', ROOT);
+  const RESET_VIEW = { yaw: -37.5 * Math.PI / 180, pitch: 28 * Math.PI / 180, zoom: 1 };
+  const FACTOR_LABELS = {
+    value: 'Value · lowest relative valuation',
+    quality: 'Quality · strongest fundamentals',
+    momentum: 'Momentum · strongest trend',
+    low_volatility: 'Low Volatility · lowest relative risk'
   };
-  var METRICS = {
-    earningsYield: { label: 'Earnings yield', format: 'percent', higherBetter: true },
-    dividendYield: { label: 'Trailing dividend yield', format: 'percent', higherBetter: true },
-    roe: { label: 'Return on equity', format: 'percent', higherBetter: true },
-    debtToEquity: { label: 'Debt-to-equity', format: 'multiple', higherBetter: false },
-    momentum12_1: { label: '12–1 month momentum', format: 'percent', higherBetter: true },
-    aboveSma200: { label: 'Distance from SMA200', format: 'percent', higherBetter: true },
-    beta: { label: 'Market beta', format: 'multiple', higherBetter: false },
-    residualVolatility: { label: 'Residual volatility', format: 'percent', higherBetter: false }
-  };
-  var state = {
-    issuers: [],
-    scores: {},
-    selected: null,
-    hovered: null,
-    yaw: -0.72,
-    pitch: 0.43,
-    zoom: 1,
-    dragging: false,
-    dragMoved: false,
-    lastX: 0,
-    lastY: 0,
-    pointerX: 0,
-    pointerY: 0,
-    plot: [],
-    dpr: 1,
+
+  const canvas = document.getElementById('factor-zoo-canvas');
+  const ctx = canvas.getContext('2d');
+  const frame = canvas.closest('.chart-frame');
+  const tooltip = frame.querySelector('.tooltip');
+  const loadState = document.getElementById('load-state');
+  const state = {
+    data: null,
+    view: { ...RESET_VIEW },
     width: 0,
     height: 0,
-    axes: { x: 'momentum', y: 'value', z: 'quality' },
-    group: 'all',
-    query: ''
+    points: [],
+    hovered: null,
+    drag: null,
+    drawing: false,
+    followMatlab: false,
+    lastMatlabView: '',
+    pollTimer: null
   };
 
-  var canvas = document.getElementById('factor-chart');
-  var ctx = canvas.getContext('2d');
-  var panel = document.getElementById('issuer-panel');
-  var search = document.getElementById('issuer-search');
-  var groupFilter = document.getElementById('group-filter');
-  var scoreRows = document.getElementById('score-rows');
-  var scatterView = document.getElementById('scatter-view');
-  var scorecardView = document.getElementById('scorecard-view');
-  var scatterTab = document.getElementById('scatter-tab');
-  var tableTab = document.getElementById('table-tab');
-
-  function quantile(sorted, p) {
-    if (!sorted.length) return NaN;
-    if (sorted.length === 1) return sorted[0];
-    var position = (sorted.length - 1) * p;
-    var lower = Math.floor(position);
-    var fraction = position - lower;
-    return sorted[lower] + (sorted[Math.min(lower + 1, sorted.length - 1)] - sorted[lower]) * fraction;
+  function isAvailableScore(value) {
+    return value && value.status === 'AVAILABLE' && Number.isFinite(Number(value.score));
   }
 
-  function mean(values) {
-    return values.reduce(function (sum, value) { return sum + value; }, 0) / values.length;
+  function factorScoreLabel(value) {
+    return value == null || value === '' || !Number.isFinite(Number(value)) ? '—' : Number(value).toFixed(2);
   }
 
-  function scoreComponent(issuers, metricKey, peerGroup) {
-    var definition = METRICS[metricKey];
-    var candidates = issuers.filter(function (issuer) {
-      return Number.isFinite(issuer[metricKey]) && (!peerGroup || issuer.group === peerGroup);
-    });
-    if (candidates.length < 5) return {};
-    var directed = candidates.map(function (issuer) {
-      return definition.higherBetter ? issuer[metricKey] : -issuer[metricKey];
-    });
-    var sorted = directed.slice().sort(function (a, b) { return a - b; });
-    var low = quantile(sorted, 0.05);
-    var high = quantile(sorted, 0.95);
-    var clipped = directed.map(function (value) { return Math.max(low, Math.min(high, value)); });
-    var center = mean(clipped);
-    var variance = mean(clipped.map(function (value) { return Math.pow(value - center, 2); }));
-    var sd = Math.sqrt(variance);
-    if (!Number.isFinite(sd) || sd <= 1e-12) return {};
-    var result = {};
-    candidates.forEach(function (issuer, index) {
-      result[issuer.ticker] = Math.max(-3, Math.min(3, (clipped[index] - center) / sd));
-    });
-    return result;
+  function factorValueLabel(value) {
+    return value == null || value === '' || !Number.isFinite(Number(value))
+      ? '—'
+      : Number(value).toLocaleString('id-ID', { maximumFractionDigits: 4 });
   }
 
-  function buildScores(issuers) {
-    var componentScoreMaps = {};
-    Object.keys(METRICS).forEach(function (metricKey) {
-      if (metricKey === 'roe' || metricKey === 'debtToEquity') {
-        componentScoreMaps[metricKey] = {};
-        ['Financial', 'Non-financial'].forEach(function (peerGroup) {
-          Object.assign(componentScoreMaps[metricKey], scoreComponent(issuers, metricKey, peerGroup));
-        });
-      } else {
-        componentScoreMaps[metricKey] = scoreComponent(issuers, metricKey, null);
-      }
-    });
-    var scoreMap = {};
-    issuers.forEach(function (issuer) {
-      scoreMap[issuer.ticker] = {};
-      Object.keys(FACTORS).forEach(function (factorKey) {
-        var available = FACTORS[factorKey].components.map(function (component) {
-          return componentScoreMaps[component][issuer.ticker];
-        }).filter(Number.isFinite);
-        scoreMap[issuer.ticker][factorKey] = available.length ? mean(available) : null;
-      });
-    });
-    return scoreMap;
+  function signedFactorScore(value) {
+    return value == null || !Number.isFinite(Number(value))
+      ? '—'
+      : `${Number(value) > 0 ? '+' : ''}${Number(value).toFixed(2)}σ`;
   }
 
-  function formatRaw(value, format) {
-    if (!Number.isFinite(value)) return 'Not available';
-    if (format === 'percent') return (value * 100).toFixed(1) + '%';
-    return value.toFixed(2) + '×';
+  function percentInput(value) {
+    return value == null || !Number.isFinite(Number(value))
+      ? 'unavailable'
+      : `${(Number(value) * 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
   }
 
-  function scoreColor(value) {
-    if (!Number.isFinite(value)) return '#71849d';
-    if (value >= 0.6) return '#35d0b2';
-    if (value <= -0.6) return '#f27586';
-    return '#63a6ff';
+  function ratioInput(value) {
+    return value == null || !Number.isFinite(Number(value))
+      ? 'unavailable'
+      : Number(value).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
   }
 
-  function scoreLabel(value) {
-    if (!Number.isFinite(value)) return 'N/A';
-    return (value > 0 ? '+' : '') + value.toFixed(2);
+  function componentLine(label, component, format) {
+    if (!component || component.status !== 'AVAILABLE' || component.value == null) {
+      return `  ${label}: unavailable (${component?.status || 'NO DATA'})`;
+    }
+    const componentScore = component.z_score == null ? 'not scored' : signedFactorScore(component.z_score);
+    const peerCount = component.peer_count == null ? 'peer count unavailable' : `n=${component.peer_count} eligible peers`;
+    return `  ${label}: ${format(component.value)} · component z ${componentScore} · ${peerCount}`;
   }
 
-  function visibleIssuers() {
-    var normalizedQuery = state.query.trim().toLowerCase();
-    return state.issuers.filter(function (issuer) {
-      var groupMatches = state.group === 'all' || issuer.group === state.group;
-      var textMatches = !normalizedQuery || issuer.ticker.toLowerCase().indexOf(normalizedQuery) >= 0 || issuer.company.toLowerCase().indexOf(normalizedQuery) >= 0;
-      return groupMatches && textMatches;
-    });
+  function factorBlock(label, score, componentLines) {
+    const value = signedFactorScore(score?.score);
+    const status = score?.status || 'UNAVAILABLE';
+    return `${label}: ${value} (${status}) · mean of component z-scores\n${componentLines.join('\n')}`;
   }
 
-  function axesValid() {
-    var values = [state.axes.x, state.axes.y, state.axes.z];
-    return new Set(values).size === values.length;
-  }
-
-  function axisValue(ticker, axis) {
-    return state.scores[ticker] ? state.scores[ticker][axis] : null;
-  }
-
-  function projectPoint(x, y, z, width, height) {
-    var cosYaw = Math.cos(state.yaw);
-    var sinYaw = Math.sin(state.yaw);
-    var cosPitch = Math.cos(state.pitch);
-    var sinPitch = Math.sin(state.pitch);
-    var xRot = x * cosYaw - z * sinYaw;
-    var zRot = x * sinYaw + z * cosYaw;
-    var yRot = y * cosPitch - zRot * sinPitch;
-    var depth = y * sinPitch + zRot * cosPitch;
-    var unit = Math.min(width * 0.27, height * 0.34) * state.zoom;
-    var perspective = 1 + depth * 0.035;
+  function project(x, y, z) {
+    const az = state.view.yaw;
+    const el = state.view.pitch;
+    const ca = Math.cos(az), sa = Math.sin(az), ce = Math.cos(el), se = Math.sin(el);
+    const X = x / 3, Y = y / 3, Z = z / 3;
+    const rx = X * ca - Y * sa;
+    const ry0 = X * sa + Y * ca;
+    const vertical = ry0 * se + Z * ce;
+    const depth = ry0 * ce - Z * se;
+    const perspective = 9 / (9 + depth);
+    const scale = Math.min(state.width * 0.27, state.height * 0.21) * state.view.zoom;
     return {
-      x: width * 0.51 + xRot * unit * perspective,
-      y: height * 0.51 - yRot * unit * perspective,
-      depth: depth,
-      radius: 5.7 + Math.max(-1.4, Math.min(2.1, depth * 0.42))
+      x: state.width * 0.47 + rx * scale * perspective,
+      y: state.height * 0.50 - vertical * scale * perspective,
+      depth
     };
   }
 
-  function toNorm(value) {
-    if (!Number.isFinite(value)) return 0;
-    return Math.max(-1, Math.min(1, value / 3));
+  function parulaColor(value) {
+    if (!Number.isFinite(Number(value))) return '#778493';
+    const stops = [
+      ['#352a87', [53, 42, 135]], ['#0f5cdd', [15, 92, 221]],
+      ['#128ac0', [18, 138, 192]], ['#00bf87', [0, 191, 135]],
+      ['#76d34b', [118, 211, 75]], ['#f9e721', [249, 231, 33]]
+    ];
+    const t = Math.max(0, Math.min(1, (Number(value) + 3) / 6)) * (stops.length - 1);
+    const index = Math.min(stops.length - 2, Math.floor(t));
+    const fraction = t - index;
+    const from = stops[index][1], to = stops[index + 1][1];
+    return `rgb(${from.map((channel, i) => Math.round(channel + (to[i] - channel) * fraction)).join(',')})`;
   }
 
-  function drawLine(a, b, color, width, dash) {
-    ctx.beginPath();
-    ctx.setLineDash(dash || []);
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
+  function drawAxes() {
+    const ticks = [-3, -2, -1, 0, 1, 2, 3];
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(103,125,145,.31)';
+    // XY floor and the rear XZ/YZ panes match the source Factor Zoo plot.
+    for (const tick of ticks) {
+      const segments = [
+        [project(-3, tick, -3), project(3, tick, -3)],
+        [project(tick, -3, -3), project(tick, 3, -3)],
+        [project(-3, -3, tick), project(3, -3, tick)],
+        [project(-3, tick, -3), project(-3, tick, 3)],
+        [project(tick, -3, -3), project(tick, -3, 3)]
+      ];
+      for (const [a, b] of segments) {
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
+    }
 
-  function drawGrid(width, height) {
-    var tick = [-1, -0.5, 0, 0.5, 1];
-    var origin = projectPoint(0, 0, 0, width, height);
-    var axisX = projectPoint(1.18, 0, 0, width, height);
-    var axisY = projectPoint(0, 1.18, 0, width, height);
-    var axisZ = projectPoint(0, 0, 1.18, width, height);
-    var faint = 'rgba(103,132,160,.15)';
-    tick.forEach(function (value) {
-      drawLine(projectPoint(-1, value, -1, width, height), projectPoint(1, value, -1, width, height), faint, 1);
-      drawLine(projectPoint(value, -1, -1, width, height), projectPoint(value, 1, -1, width, height), faint, 1);
-      drawLine(projectPoint(-1, -1, value, width, height), projectPoint(-1, 1, value, width, height), faint, 1);
-    });
-    drawLine(origin, axisX, 'rgba(151,174,198,.62)', 1.15);
-    drawLine(origin, axisY, 'rgba(151,174,198,.62)', 1.15);
-    drawLine(origin, axisZ, 'rgba(151,174,198,.62)', 1.15);
-    ctx.fillStyle = '#9dafc4';
-    ctx.font = '600 11px Inter, system-ui, sans-serif';
+    const edges = [
+      [[-3,-3,-3],[3,-3,-3]], [[-3,-3,-3],[-3,3,-3]], [[-3,-3,-3],[-3,-3,3]],
+      [[3,-3,-3],[3,3,-3]], [[3,-3,-3],[3,-3,3]], [[-3,3,-3],[3,3,-3]],
+      [[-3,3,-3],[-3,3,3]], [[-3,-3,3],[3,-3,3]], [[-3,-3,3],[-3,3,3]],
+      [[3,3,-3],[3,3,3]], [[3,-3,3],[3,3,3]], [[-3,3,3],[3,3,3]]
+    ];
+    ctx.strokeStyle = 'rgba(174,190,203,.78)';
+    ctx.lineWidth = 1.35;
+    for (const [[x1,y1,z1],[x2,y2,z2]] of edges) {
+      const a = project(x1,y1,z1), b = project(x2,y2,z2);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+
+    ctx.font = '12px Inter,-apple-system,sans-serif';
+    ctx.fillStyle = '#dce5ed';
     ctx.textAlign = 'center';
-    ctx.fillText(FACTORS[state.axes.x].label + '  X', axisX.x + 13, axisX.y + 13);
-    ctx.fillText(FACTORS[state.axes.y].label + '  Y', axisY.x - 4, axisY.y - 12);
-    ctx.fillText(FACTORS[state.axes.z].label + '  Z', axisZ.x + 1, axisZ.y - 12);
-    ctx.fillStyle = '#71849d';
-    ctx.font = '9px Inter, system-ui, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('−3', projectPoint(-1, 0, 0, width, height).x - 2, projectPoint(-1, 0, 0, width, height).y + 15);
-    ctx.fillText('+3', axisX.x + 2, axisX.y + 28);
-    ctx.textAlign = 'right';
-    ctx.fillText('−3', projectPoint(0, -1, 0, width, height).x - 7, projectPoint(0, -1, 0, width, height).y + 3);
-    ctx.fillText('+3', axisY.x - 12, axisY.y - 3);
+    ctx.textBaseline = 'middle';
+    for (const tick of ticks) {
+      let point = project(tick, -3, -3); ctx.fillText(String(tick), point.x, point.y + 15);
+      point = project(-3, tick, -3); ctx.fillText(String(tick), point.x - 16, point.y + 2);
+      point = project(-3, -3, tick); ctx.textAlign = 'right'; ctx.fillText(String(tick), point.x - 10, point.y); ctx.textAlign = 'center';
+    }
+
+    ctx.font = '600 13px Inter,-apple-system,sans-serif';
+    ctx.fillStyle = '#e4ebf2';
+    const axisLabel = (label, start, end, offset = 17) => {
+      const a = project(...start), b = project(...end);
+      const angle = Math.atan2(b.y - a.y, b.x - a.x);
+      let readable = angle;
+      if (readable > Math.PI / 2) readable -= Math.PI;
+      else if (readable < -Math.PI / 2) readable += Math.PI;
+      const midpoint = project((start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2);
+      const normalX = -Math.sin(readable), normalY = Math.cos(readable);
+      ctx.save();
+      ctx.translate(midpoint.x + normalX * offset, midpoint.y + normalY * offset);
+      ctx.rotate(readable);
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+    };
+    axisLabel('Value (X)', [-3, -3, -3], [3, -3, -3], 22);
+    axisLabel('Momentum (Y)', [-3, -3, -3], [-3, 3, -3], 22);
+    axisLabel('Quality (Z)', [-3, -3, -3], [-3, -3, 3], 22);
   }
 
-  function drawCanvas() {
-    var rect = canvas.getBoundingClientRect();
+  function drawNow() {
+    const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
-    state.dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
     state.width = rect.width;
     state.height = rect.height;
-    canvas.width = Math.round(rect.width * state.dpr);
-    canvas.height = Math.round(rect.height * state.dpr);
-    ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
-    ctx.clearRect(0, 0, rect.width, rect.height);
-    drawGrid(rect.width, rect.height);
-    var points = visibleIssuers().filter(function (issuer) {
-      return ['x', 'y', 'z'].every(function (axisName) { return Number.isFinite(axisValue(issuer.ticker, state.axes[axisName])); });
-    }).map(function (issuer) {
-      var projected = projectPoint(
-        toNorm(axisValue(issuer.ticker, state.axes.x)),
-        toNorm(axisValue(issuer.ticker, state.axes.y)),
-        toNorm(axisValue(issuer.ticker, state.axes.z)),
-        rect.width,
-        rect.height
-      );
-      projected.issuer = issuer;
-      projected.color = scoreColor(axisValue(issuer.ticker, 'lowVol'));
-      return projected;
-    }).sort(function (a, b) { return a.depth - b.depth; });
-    state.plot = points;
-    points.forEach(function (point) {
-      var isSelected = state.selected === point.issuer.ticker;
-      var isHovered = state.hovered === point.issuer.ticker;
-      var radius = point.radius + (isSelected || isHovered ? 2 : 0);
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, radius + 5, 0, Math.PI * 2);
-      ctx.fillStyle = point.color + '18';
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = point.color;
-      ctx.fill();
-      ctx.lineWidth = isSelected ? 2 : 1;
-      ctx.strokeStyle = isSelected ? '#f5f8fc' : 'rgba(229,238,248,.45)';
-      ctx.stroke();
-      ctx.fillStyle = isHovered || isSelected ? '#f1f5fa' : '#a9bbcf';
-      ctx.font = (isHovered || isSelected ? '700 ' : '600 ') + '9px Inter, system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(point.issuer.ticker, point.x, point.y - radius - 7);
-    });
-    if (state.hovered) drawHoverCard(rect.width, rect.height);
-    if (!points.length) drawEmptyState(rect.width, rect.height);
-  }
-
-  function drawEmptyState(width, height) {
-    ctx.fillStyle = '#91a2b9';
-    ctx.textAlign = 'center';
-    ctx.font = '12px Inter, system-ui, sans-serif';
-    ctx.fillText('No issuers match these filters.', width / 2, height / 2);
-  }
-
-  function drawHoverCard(width, height) {
-    var point = state.plot.find(function (item) { return item.issuer.ticker === state.hovered; });
-    if (!point) return;
-    var cardWidth = 154;
-    var cardHeight = 60;
-    var x = Math.min(width - cardWidth - 10, Math.max(10, state.pointerX + 15));
-    var y = Math.min(height - cardHeight - 10, Math.max(10, state.pointerY + 12));
-    ctx.fillStyle = 'rgba(5,13,22,.95)';
-    ctx.strokeStyle = '#2a425b';
-    ctx.lineWidth = 1;
-    roundRect(ctx, x, y, cardWidth, cardHeight, 8);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#eef4fb';
-    ctx.textAlign = 'left';
-    ctx.font = '700 11px Inter, system-ui, sans-serif';
-    ctx.fillText(point.issuer.ticker + ' · ' + point.issuer.group, x + 10, y + 17);
-    ctx.fillStyle = '#9fb1c5';
-    ctx.font = '9px Inter, system-ui, sans-serif';
-    ctx.fillText(FACTORS[state.axes.x].label + ': ' + scoreLabel(axisValue(point.issuer.ticker, state.axes.x)), x + 10, y + 34);
-    ctx.fillText(FACTORS[state.axes.y].label + ': ' + scoreLabel(axisValue(point.issuer.ticker, state.axes.y)) + '   ' + FACTORS[state.axes.z].label + ': ' + scoreLabel(axisValue(point.issuer.ticker, state.axes.z)), x + 10, y + 49);
-  }
-
-  function roundRect(context, x, y, width, height, radius) {
-    context.beginPath();
-    context.moveTo(x + radius, y);
-    context.arcTo(x + width, y, x + width, y + height, radius);
-    context.arcTo(x + width, y + height, x, y + height, radius);
-    context.arcTo(x, y + height, x, y, radius);
-    context.arcTo(x, y, x + width, y, radius);
-    context.closePath();
-  }
-
-
-  function renderIssuerPanel(ticker) {
-    var issuer = state.issuers.find(function (item) { return item.ticker === ticker; });
-    if (!issuer) {
-      panel.innerHTML = '<div class="empty-selection"><span class="empty-glyph">◎</span><h3>Select an issuer</h3><p>Hover or click a point in the chart, or select a ticker from the scorecard.</p></div>';
-      return;
+    const pixelWidth = Math.round(rect.width * dpr), pixelHeight = Math.round(rect.height * dpr);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
     }
-    var scores = state.scores[ticker];
-    var factorHtml = Object.keys(FACTORS).map(function (key) {
-      var value = scores[key];
-      var width = Number.isFinite(value) ? Math.min(50, Math.abs(value) / 3 * 50) : 0;
-      var left = Number.isFinite(value) && value < 0 ? 50 - width : 50;
-      var color = scoreColor(value);
-      return '<div class="score-row"><span class="score-name">' + FACTORS[key].label + '</span><span class="score-track"><span class="score-fill" style="position:absolute;left:' + left + '%;width:' + width + '%;background:' + color + '"></span></span><strong class="score-value" style="color:' + color + '">' + scoreLabel(value) + '</strong></div>';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#090a0e';
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    drawAxes();
+
+    const records = state.data.records || [];
+    const points = records
+      .filter(record => ['value', 'momentum', 'quality'].every(key => isAvailableScore(record.scores?.[key])))
+      .map(record => ({
+        record,
+        x: Number(record.scores.value.score),
+        y: Number(record.scores.momentum.score),
+        z: Number(record.scores.quality.score),
+        low: isAvailableScore(record.scores.low_volatility) ? Number(record.scores.low_volatility.score) : null
+      }))
+      .map(point => ({ ...point, p: project(point.x, point.y, point.z) }))
+      .sort((a, b) => a.p.depth - b.p.depth);
+    state.points = points;
+
+    for (const point of points) {
+      const active = state.hovered?.record.ticker === point.record.ticker;
+      const radius = active ? 9 : 6.5;
+      ctx.beginPath(); ctx.arc(point.p.x, point.p.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = parulaColor(point.low); ctx.fill();
+      ctx.strokeStyle = active ? '#ffffff' : 'rgba(226,239,250,.82)';
+      ctx.lineWidth = active ? 2.2 : 1; ctx.stroke();
+    }
+
+    if (state.hovered) {
+      const point = state.hovered;
+      const base = project(point.x, point.y, -3);
+      const xEnd = project(point.x, -3, -3);
+      const yEnd = project(-3, point.y, -3);
+      const zEnd = project(-3, -3, point.z);
+      ctx.save(); ctx.strokeStyle = 'rgba(238,246,255,.82)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      for (const [a, b] of [[point.p, base], [base, xEnd], [base, yEnd], [base, zEnd]]) {
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
+      ctx.setLineDash([]); ctx.beginPath(); ctx.arc(point.p.x, point.p.y, 11, 0, Math.PI * 2);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.25; ctx.stroke(); ctx.restore();
+    }
+
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#e4ebf2'; ctx.font = '600 17px Inter,-apple-system,sans-serif';
+    ctx.fillText('LQ45 Factor Zoo · descriptive cross-sectional scores', 22, 28);
+    ctx.font = '600 13px Inter,-apple-system,sans-serif'; ctx.fillStyle = '#c5d0dc';
+    ctx.fillText(`Current snapshot · IHSG reference date ${state.data.as_of.price} · ${points.length} plotted issuers of ${state.data.universe.count}`, 22, 49);
+  }
+
+  function draw() {
+    if (state.drawing) return;
+    state.drawing = true;
+    requestAnimationFrame(() => { state.drawing = false; drawNow(); });
+  }
+
+  function showTooltip(point, x, y) {
+    if (!point) { tooltip.hidden = true; return; }
+    const record = point.record;
+    const components = record.components;
+    const scores = record.scores;
+    const quality = record.data_quality || {};
+    const peerGroup = record.peer_group === 'non_financial' ? 'non-financial' : (record.peer_group || 'unclassified');
+    tooltip.textContent = `${record.ticker} · ${record.company}\n` +
+      `${record.sector || 'Sector unavailable'} · ${record.sub_sector || 'Sub-sector unavailable'} · ${peerGroup} peers\n` +
+      `IHSG reference: ${state.data.as_of.price} · issuer prices: ${quality.daily_coverage_start || '—'}–${quality.daily_coverage_end || '—'} (${quality.daily_observation_count ?? '—'} closes; ${quality.aligned_ihsg_returns ?? '—'} aligned IHSG returns) · report as of: ${record.report_as_of || '—'}\n` +
+      `Snapshot quality: daily ${quality.daily || 'unknown'} · company report ${quality.company_report || 'unknown'}\n` +
+      `\n` + factorBlock('Value (X)', scores.value, [
+        componentLine('Earnings yield', components.earnings_yield, percentInput),
+        componentLine('Dividend yield', components.dividend_yield, percentInput)
+      ]) +
+      `\n\n` + factorBlock('Momentum (Y)', scores.momentum, [
+        componentLine('12–1 return', components.momentum_12_1, percentInput),
+        componentLine('Close / SMA200 − 1', components.price_vs_ma200, percentInput)
+      ]) +
+      `\n\n` + factorBlock('Quality (Z)', scores.quality, [
+        componentLine('ROE', components.roe, ratioInput),
+        componentLine('Debt-to-equity (reversed)', components.debt_to_equity, ratioInput)
+      ]) +
+      `\n\n` + factorBlock('Low Volatility (color)', scores.low_volatility, [
+        componentLine('IHSG beta (reversed)', components.beta_ihsg, value => `${ratioInput(value)}×`),
+        componentLine('Daily residual volatility (reversed)', components.idiosyncratic_volatility, percentInput)
+      ]) +
+      `\n\nScoring: P5/P95 winsorization → population z-score, clipped to ±3; factor score = arithmetic mean of component z-scores. Lower DER, beta, and residual volatility score higher. Quality peers are standardized within the financial or non-financial group. ROE and DER are shown in source report ratio units; residual volatility is daily.`;
+    const tooltipWidth = Math.min(420, Math.max(260, state.width - 28));
+    const maxLeft = Math.max(8, state.width - tooltipWidth - 8);
+    tooltip.style.width = `${tooltipWidth}px`;
+    tooltip.style.maxHeight = `${Math.max(160, state.height - 16)}px`;
+    tooltip.hidden = false;
+    const tooltipHeight = tooltip.offsetHeight;
+    const maxTop = Math.max(8, state.height - tooltipHeight - 8);
+    tooltip.style.left = `${Math.max(8, Math.min(maxLeft, x + 14))}px`;
+    tooltip.style.top = `${Math.max(8, Math.min(maxTop, y + 14))}px`;
+  }
+
+  function renderLeaderboards(data) {
+    const root = document.getElementById('leaderboards');
+    root.innerHTML = Object.entries(FACTOR_LABELS).map(([factor, title]) => {
+      const rows = (data.leaderboards?.[factor] || []).slice(0, 5);
+      const list = rows.length
+        ? `<ol>${rows.map(row => `<li><b>${escapeText(row.ticker)}</b> <span>${factorScoreLabel(row.score)}σ · ${Number(row.components)}/2 inputs</span></li>`).join('')}</ol>`
+        : '<p class="empty-board">No complete scores meet the requirements.</p>';
+      return `<article class="leaderboard-card"><h3>${escapeText(title)}</h3>${list}</article>`;
     }).join('');
-    var rawHtml = Object.keys(METRICS).map(function (key) {
-      return '<div class="raw-item"><span>' + METRICS[key].label + '</span><strong>' + formatRaw(issuer[key], METRICS[key].format) + '</strong></div>';
-    }).join('');
-    panel.innerHTML = '<div class="issuer-detail-head"><div><h3>' + issuer.ticker + '</h3><p>' + issuer.company + '</p><span class="peer-tag">' + issuer.group + ' peer group</span></div><span class="synthetic-tag">SYNTHETIC</span></div><div class="score-list">' + factorHtml + '</div><div class="raw-grid">' + rawHtml + '</div><p class="detail-note">Scores are generated from synthetic example inputs and standardized within this demo cross-section. They do not describe the real issuer.</p>';
   }
 
-  function renderTable() {
-    var rows = visibleIssuers().slice().sort(function (a, b) { return a.ticker.localeCompare(b.ticker); });
-    scoreRows.innerHTML = rows.map(function (issuer) {
-      var selectedClass = state.selected === issuer.ticker ? ' class="selected"' : '';
-      var factors = Object.keys(FACTORS).map(function (key) {
-        var score = state.scores[issuer.ticker][key];
-        var width = Number.isFinite(score) ? Math.min(100, Math.abs(score) / 3 * 100) : 0;
-        return '<td><span class="table-score"><b style="color:' + scoreColor(score) + '">' + scoreLabel(score) + '</b><span class="table-bar"><i style="width:' + width + '%;background:' + scoreColor(score) + '"></i></span></span></td>';
-      }).join('');
-      return '<tr data-ticker="' + issuer.ticker + '"' + selectedClass + '><td><span class="ticker-cell">' + issuer.ticker + '</span><br>' + issuer.company + '</td><td>' + issuer.group + '</td>' + factors + '</tr>';
-    }).join('');
-    scoreRows.querySelectorAll('tr').forEach(function (row) {
-      row.addEventListener('click', function () {
-        state.selected = row.getAttribute('data-ticker');
-        state.hovered = null;
-        renderIssuerPanel(state.selected);
-        renderTable();
-        drawCanvas();
-      });
-    });
+  function escapeText(value) {
+    return String(value).replace(/[&<>"']/g, character => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[character]);
   }
 
-  function selectTicker(ticker) {
-    state.selected = ticker;
-    renderIssuerPanel(ticker);
-    renderTable();
-    drawCanvas();
+  function setFollow(enabled) {
+    state.followMatlab = enabled;
+    if (enabled) pollMatlabView();
+    else stopPolling();
   }
 
-  function mousePosition(event) {
-    var rect = canvas.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  }
-
-  canvas.addEventListener('pointerdown', function (event) {
-    if (event.button !== undefined && event.button !== 0) return;
-    state.dragging = true;
-    state.dragMoved = false;
-    state.lastX = event.clientX;
-    state.lastY = event.clientY;
-    canvas.setPointerCapture(event.pointerId);
-  });
-  canvas.addEventListener('pointermove', function (event) {
-    var position = mousePosition(event);
-    state.pointerX = position.x;
-    state.pointerY = position.y;
-    if (state.dragging) {
-      var dx = event.clientX - state.lastX;
-      var dy = event.clientY - state.lastY;
-      if (Math.abs(dx) + Math.abs(dy) > 2) state.dragMoved = true;
-      state.yaw += dx * 0.008;
-      state.pitch = Math.max(-1.2, Math.min(1.2, state.pitch + dy * 0.008));
-      state.lastX = event.clientX;
-      state.lastY = event.clientY;
-      drawCanvas();
-      return;
-    }
-    var nearest = null;
-    var nearestDistance = 18;
-    state.plot.forEach(function (point) {
-      var distance = Math.hypot(position.x - point.x, position.y - point.y);
-      if (distance < nearestDistance) { nearest = point; nearestDistance = distance; }
-    });
-    var ticker = nearest ? nearest.issuer.ticker : null;
-    if (ticker !== state.hovered) {
-      state.hovered = ticker;
-      if (ticker) renderIssuerPanel(ticker);
-      else renderIssuerPanel(state.selected);
-    }
-    drawCanvas();
-  });
-  canvas.addEventListener('pointerup', function (event) {
-    if (state.dragging && !state.dragMoved) {
-      var position = mousePosition(event);
-      var nearest = null;
-      var nearestDistance = 22;
-      state.plot.forEach(function (point) {
-        var distance = Math.hypot(position.x - point.x, position.y - point.y);
-        if (distance < nearestDistance) { nearest = point; nearestDistance = distance; }
-      });
-      if (nearest) selectTicker(nearest.issuer.ticker);
-    }
-    state.dragging = false;
-  });
-  canvas.addEventListener('pointercancel', function () { state.dragging = false; });
-  canvas.addEventListener('pointerleave', function () {
-    if (!state.dragging) {
-      state.hovered = null;
-      renderIssuerPanel(state.selected);
-      drawCanvas();
-    }
-  });
-  canvas.addEventListener('wheel', function (event) {
-    event.preventDefault();
-    state.zoom = Math.max(0.68, Math.min(1.6, state.zoom * (event.deltaY < 0 ? 1.08 : 0.92)));
-    drawCanvas();
-  }, { passive: false });
-  canvas.addEventListener('keydown', function (event) {
-    if (event.key === 'ArrowLeft') state.yaw -= 0.12;
-    else if (event.key === 'ArrowRight') state.yaw += 0.12;
-    else if (event.key === 'ArrowUp') state.pitch = Math.min(1.2, state.pitch + 0.12);
-    else if (event.key === 'ArrowDown') state.pitch = Math.max(-1.2, state.pitch - 0.12);
-    else if (event.key === 'Enter' && state.hovered) selectTicker(state.hovered);
-    else return;
-    event.preventDefault();
-    drawCanvas();
-  });
-
-  function setView(view) {
-    var isScatter = view === 'scatter';
-    scatterView.classList.toggle('hidden', !isScatter);
-    scorecardView.classList.toggle('hidden', isScatter);
-    scatterTab.classList.toggle('active', isScatter);
-    tableTab.classList.toggle('active', !isScatter);
-    scatterTab.setAttribute('aria-selected', isScatter ? 'true' : 'false');
-    tableTab.setAttribute('aria-selected', isScatter ? 'false' : 'true');
-    if (isScatter) drawCanvas();
-  }
-  scatterTab.addEventListener('click', function () { setView('scatter'); });
-  tableTab.addEventListener('click', function () { setView('table'); });
-  search.addEventListener('input', function () {
-    state.query = search.value;
-    renderTable();
-    drawCanvas();
-  });
-  groupFilter.addEventListener('change', function () {
-    state.group = groupFilter.value;
-    renderTable();
-    drawCanvas();
-  });
-  ['x', 'y', 'z'].forEach(function (axisName) {
-    var control = document.getElementById('axis-' + axisName);
-    control.addEventListener('change', function () {
-      var chosen = control.value;
-      var otherNames = ['x', 'y', 'z'].filter(function (name) { return name !== axisName; });
-      otherNames.forEach(function (otherName) {
-        if (state.axes[otherName] === chosen) {
-          var replacement = Object.keys(FACTORS).find(function (candidate) {
-            return candidate !== chosen && otherNames.every(function (name) { return name === otherName || state.axes[name] !== candidate; });
-          });
-          state.axes[otherName] = replacement;
-          document.getElementById('axis-' + otherName).value = replacement;
+  async function pollMatlabView() {
+    if (!state.followMatlab) return;
+    try {
+      const url = new URL(MATLAB_VIEW_URL);
+      url.searchParams.set('t', String(Date.now()));
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const view = await response.json();
+      if (view.schema_version !== state.data.schema_version || view.status === 'SYNC_ERROR') {
+        throw new Error(view.error || 'MATLAB view schema does not match.');
+      }
+      if (!Number.isFinite(Number(view.azimuth)) || !Number.isFinite(Number(view.elevation))) {
+        throw new Error('MATLAB angles must be valid numbers.');
+      }
+      if (view.status !== 'WAITING_FOR_MATLAB' && view.artifact_fingerprint === state.data.artifact_fingerprint) {
+        const key = `${Number(view.azimuth).toFixed(2)}:${Number(view.elevation).toFixed(2)}`;
+        if (key !== state.lastMatlabView) {
+          state.lastMatlabView = key;
+          state.view.yaw = Number(view.azimuth) * Math.PI / 180;
+          state.view.pitch = Math.max(-0.9, Math.min(1.1, Number(view.elevation) * Math.PI / 180));
+          draw();
         }
-      });
-      state.axes[axisName] = chosen;
-      drawCanvas();
-    });
-  });
-  document.getElementById('reset-view').addEventListener('click', function () {
-    state.yaw = -0.72;
-    state.pitch = 0.43;
-    state.zoom = 1;
-    drawCanvas();
-  });
-  window.addEventListener('resize', drawCanvas);
+      }
+    } catch (_) {}
+  }
 
-  fetch('data/demo-universe.json').then(function (response) {
-    if (!response.ok) throw new Error('Could not load the example issuer file.');
-    return response.json();
-  }).then(function (data) {
-    state.issuers = data.issuers;
-    state.scores = buildScores(state.issuers);
-    document.getElementById('issuer-count').textContent = String(state.issuers.length).padStart(2, '0');
-    state.selected = state.issuers.some(function (issuer) { return issuer.ticker === 'BBCA'; }) ? 'BBCA' : state.issuers[0].ticker;
-    renderIssuerPanel(state.selected);
-    renderTable();
-    drawCanvas();
-  }).catch(function () {
-    panel.innerHTML = '<div class="empty-selection"><span class="empty-glyph">!</span><h3>Example data could not load</h3><p>Open this page through a local static server, then refresh. The app makes no external data requests.</p></div>';
-    ctx.fillStyle = '#91a2b9';
-    ctx.textAlign = 'center';
-    ctx.font = '12px Inter, system-ui, sans-serif';
-    ctx.fillText('Serve the project folder locally to load demo data.', canvas.clientWidth / 2, canvas.clientHeight / 2);
-  });
-}());
+  function startPolling() {
+    if (state.pollTimer) return;
+    pollMatlabView();
+    state.pollTimer = window.setInterval(pollMatlabView, 250);
+  }
+
+  function stopPolling() {
+    if (state.pollTimer) window.clearInterval(state.pollTimer);
+    state.pollTimer = null;
+  }
+
+  function initInteractions() {
+    canvas.addEventListener('pointerdown', event => {
+      tooltip.hidden = true;
+      state.hovered = null;
+      state.drag = { x: event.clientX, y: event.clientY };
+      canvas.setPointerCapture(event.pointerId);
+      if (state.followMatlab) setFollow(false);
+    });
+
+    canvas.addEventListener('pointermove', event => {
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left, y = event.clientY - rect.top;
+      if (state.drag) {
+        state.view.yaw += (event.clientX - state.drag.x) * 0.008;
+        state.view.pitch = Math.max(-0.9, Math.min(1.1, state.view.pitch + (event.clientY - state.drag.y) * 0.008));
+        state.drag = { x: event.clientX, y: event.clientY };
+        draw();
+        return;
+      }
+      let nearest = null, distance = 20;
+      for (const point of state.points) {
+        const nextDistance = Math.hypot(point.p.x - x, point.p.y - y);
+        if (nextDistance < distance) { nearest = point; distance = nextDistance; }
+      }
+      if (nearest !== state.hovered) { state.hovered = nearest; draw(); }
+      showTooltip(nearest, x, y);
+    });
+    canvas.addEventListener('pointerup', () => { state.drag = null; });
+    canvas.addEventListener('pointercancel', () => { state.drag = null; });
+    canvas.addEventListener('pointerleave', () => { if (!state.drag) tooltip.hidden = true; });
+    canvas.addEventListener('wheel', event => {
+      event.preventDefault();
+      if (state.followMatlab) setFollow(false);
+      state.view.zoom = Math.max(0.65, Math.min(1.8, state.view.zoom * (event.deltaY < 0 ? 1.08 : 0.92)));
+      draw();
+    }, { passive: false });
+    canvas.addEventListener('keydown', event => {
+      const step = 0.08;
+      if (event.key === 'ArrowLeft') state.view.yaw -= step;
+      else if (event.key === 'ArrowRight') state.view.yaw += step;
+      else if (event.key === 'ArrowUp') state.view.pitch = Math.min(1.1, state.view.pitch + step);
+      else if (event.key === 'ArrowDown') state.view.pitch = Math.max(-0.9, state.view.pitch - step);
+      else if (event.key === '+' || event.key === '=') state.view.zoom = Math.min(1.8, state.view.zoom * 1.1);
+      else if (event.key === '-') state.view.zoom = Math.max(0.65, state.view.zoom * 0.9);
+      else if (event.key === 'Escape') { tooltip.hidden = true; state.hovered = null; draw(); return; }
+      else return;
+      event.preventDefault();
+      if (state.followMatlab) setFollow(false);
+      draw();
+    });
+
+    window.addEventListener('resize', draw);
+  }
+
+  async function loadDemo() {
+    try {
+      const response = await fetch(DATA_URL, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data.records) || !data.as_of?.price || !data.artifact_fingerprint) {
+        throw new Error('The data dump schema is incomplete.');
+      }
+      state.data = data;
+      renderLeaderboards(data);
+      loadState.hidden = true;
+      initInteractions();
+      draw();
+      if (new URLSearchParams(location.search).get('follow') === 'matlab') {
+        state.followMatlab = true;
+        startPolling();
+      }
+    } catch (error) {
+      loadState.textContent = `Factor Zoo data could not be loaded (${error.message}). Serve this folder locally, for example: python3 -m http.server 8000`;
+      loadState.hidden = false;
+    }
+  }
+
+  window.addEventListener('pagehide', stopPolling, { once: true });
+  loadDemo();
+})();
