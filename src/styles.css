@@ -97,7 +97,24 @@ body { background: #090a0e; }
   font-size: 13px;
   text-align: center;
 }
-.axis-notes { display: flex; flex-wrap: wrap; gap: 5px 16px; margin-top: 9px; color: #b0b6c0; font-size: 11px; line-height: 1.5; }
+.factor-method { margin-top: 14px; border: 1px solid #292a30; border-radius: 5px; background: #0e0f13; }
+.method-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.method-heading h2 { margin: 0; color: #e4e6eb; font-size: 14px; font-weight: 650; }
+.method-heading > span { color: var(--muted); font-size: 11px; }
+.factor-method-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; padding: 9px; }
+.method-card { min-width: 0; padding: 10px; border: 1px solid #303139; border-radius: 5px; background: #111217; }
+.method-card h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 7px; color: #e4e6eb; font-size: 13px; line-height: 1.3; }
+.axis-tag { display: inline-grid; min-width: 23px; height: 20px; place-items: center; border-radius: 4px; background: #20232b; color: #d8e4ef; font-size: 10px; }
+.value-method .axis-tag { color: #f0c65f; }
+.momentum-method .axis-tag { color: #67adff; }
+.quality-method .axis-tag { color: #47d4b3; }
+.lowvol-method .axis-tag { color: #b4c0ff; }
+.method-card p { margin: 0; color: #aeb4bf; font-size: 11px; line-height: 1.5; }
+.method-card .method-formula { min-height: 49px; margin-bottom: 6px; color: #e2e5eb; }
+.method-formula code { color: #e2e5eb; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: normal; overflow-wrap: anywhere; }
+.scoring-note { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 12px 11px; }
+.scoring-note p { margin: 0; color: #9da4af; font-size: 11px; line-height: 1.55; }
+.scoring-note strong { color: #d8dee7; }
 .leaderboard-note { margin: 8px 0 0; color: #999da5; font-size: 10px; line-height: 1.5; }
 
 .leaderboard-section { margin-top: 16px; border: 1px solid var(--line); border-radius: 5px; background: #0e0f13; }
@@ -114,6 +131,7 @@ body { background: #090a0e; }
 
 @media (max-width: 900px) {
   .chart-frame { height: 64vh; min-height: 440px; }
+  .factor-method-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .leaderboards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 560px) {
@@ -123,6 +141,8 @@ body { background: #090a0e; }
   .colorbar { right: 4px; height: 210px; gap: 4px; font-size: 9px; }
   .colorbar-gradient { width: 10px; }
   .tooltip { font-size: 11px; }
+  .factor-method-grid, .scoring-note { grid-template-columns: 1fr; }
+  .method-formula { min-height: 0 !important; }
   .leaderboards { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -17,7 +17,16 @@ Each plotted point represents one LQ45 issuer. Its 3D position and color encode 
 - **Z — Quality:** return on equity and inverse debt-to-equity. Financial and non-financial issuers use separate Quality peer groups.
 - **Color — Low Volatility:** inverse IHSG beta and inverse residual volatility. The MATLAB-style Parula scale maps higher relative scores toward yellow and lower scores toward purple.
 
-The page opens directly on the 3D visualization without a title bar or control buttons. Drag the plot to rotate it, scroll to zoom, and hover over a point to reveal its ticker, sector, exact factor scores, raw input values, component z-scores, eligible peer counts, reference dates, price coverage, and subsector. The hover also shows how the displayed score is composed, including the direction reversal for debt-to-equity, beta, and residual volatility. A point crosshair projects the selected issuer onto the axes. Use the arrow keys while the chart is focused to rotate the camera; reload the page to restore its initial view. The four leaderboard cards show the five highest **complete** scores for Value, Quality, Momentum, and Low Volatility; partial scores are excluded. Hover the corresponding point to inspect the inputs behind a leaderboard entry.
+The page opens directly on the 3D visualization without a title bar or control buttons. Drag the plot to rotate it, scroll to zoom, and hover over a point to reveal its ticker, sector, exact factor scores, raw input values, component z-scores, eligible peer counts, reference dates, price coverage, and subsector. The hover also shows how the displayed score is composed, including the direction reversal for debt-to-equity, beta, and residual volatility. A point crosshair projects the selected issuer onto the axes. Use the arrow keys while the chart is focused to rotate the camera; reload the page to restore its initial view. The **What each factor measures** cards below the plot keep the formulas and data inputs visible. The four leaderboard cards show the five highest **complete** scores for Value, Quality, Momentum, and Low Volatility; partial scores are excluded. Hover the corresponding point to inspect the inputs behind a leaderboard entry.
+
+### Factor inputs at a glance
+
+- **Value (X):** verified positive forward P/E is inverted to earnings yield; dividend yield is the trailing 12-month yield. Both are sourced from the company-report snapshot.
+- **Momentum (Y):** 12–1 return is `close[t−21] / close[t−252] − 1`; the second component is `close[t] / SMA200[t] − 1`, where SMA200 is the mean of the latest 200 daily closes.
+- **Quality (Z):** ROE and debt-to-equity (DER) come from company-report ratios. DER is direction-reversed, and both components are standardized separately for financial and non-financial peers.
+- **Low Volatility (color):** IHSG beta and the population standard deviation of OLS residual daily returns are estimated from issuer/IHSG returns aligned by date. Both components are direction-reversed; at least 126 aligned returns are required.
+
+For every issuer, hover details expose the underlying component values, z-scores, eligible peer counts, factor scores, report as-of date, price range, and IHSG reference date. A factor with incomplete component coverage is marked `PARTIAL`; unavailable components are not imputed as zero. Factor values describe relative positions in this snapshot and do not establish that a characteristic predicts returns.
 
 ## Scoring method
 
@@ -69,7 +78,7 @@ factor_zoo_camera_sync
 
 ## Project files
 
-- `index.html` — standalone plot, color scale, factor notes, and leaderboard structure.
+- `index.html` — standalone plot, color scale, always-visible factor formula/input cards, and leaderboard structure.
 - `src/factor-zoo.js` — 3D projection, rotation, zoom, hover crosshair, point details, and leaderboard rendering.
 - `src/styles.css` — responsive styling for the plot and compact factor score cards.
 - `data/demo-universe.json` — reduced, offline LQ45 factor snapshot.

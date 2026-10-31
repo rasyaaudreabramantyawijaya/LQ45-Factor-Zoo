@@ -21,13 +21,38 @@
         <div class="tooltip" role="status" aria-live="polite" hidden></div>
         <div id="load-state" class="load-state" hidden></div>
       </div>
-      <div class="axis-notes">
-        <span>X · Value · earnings yield + dividend yield</span>
-        <span>Y · Momentum · 12–1 return + close / SMA200 − 1</span>
-        <span>Z · Quality · ROE + inverse debt-to-equity (DER)</span>
-        <span>Color · Low Volatility · inverse IHSG beta + inverse residual volatility</span>
-        <span>Hover a point for raw inputs, component z-scores, peer counts, and the factor-score calculation.</span>
-      </div>
+      <section class="factor-method" aria-labelledby="factor-method-title">
+        <div class="method-heading">
+          <h2 id="factor-method-title">What each factor measures</h2>
+          <span>Inputs and scoring logic</span>
+        </div>
+        <div class="factor-method-grid">
+          <article class="method-card value-method">
+            <h3><span class="axis-tag">X</span> Value</h3>
+            <p class="method-formula"><code>Earnings yield = 1 / verified positive forward P/E</code><br><code>Dividend yield = trailing 12-month yield</code></p>
+            <p>Each input is scored across eligible issuers; Value is the mean of the two component z-scores.</p>
+          </article>
+          <article class="method-card momentum-method">
+            <h3><span class="axis-tag">Y</span> Momentum</h3>
+            <p class="method-formula"><code>12–1 return = close[t−21] / close[t−252] − 1</code><br><code>MA200 distance = close[t] / SMA200[t] − 1</code></p>
+            <p>Uses ordered daily closing prices. At least 253 closes are needed for these inputs.</p>
+          </article>
+          <article class="method-card quality-method">
+            <h3><span class="axis-tag">Z</span> Quality</h3>
+            <p class="method-formula"><code>ROE</code><br><code>Debt-to-equity (DER), direction reversed</code></p>
+            <p>Inputs come from company-report ratios. Quality is standardized separately for financial and non-financial issuers.</p>
+          </article>
+          <article class="method-card lowvol-method">
+            <h3><span class="axis-tag">Color</span> Low Volatility</h3>
+            <p class="method-formula"><code>IHSG beta, direction reversed</code><br><code>Daily OLS residual volatility, direction reversed</code></p>
+            <p>Estimated from issuer and IHSG daily returns aligned by date; at least 126 aligned returns are required.</p>
+          </article>
+        </div>
+        <div class="scoring-note">
+          <p><strong>How to read a score.</strong> Each component is winsorized at the cross-sectional 5th/95th percentiles, converted to a population z-score, then clipped to −3…+3. Lower DER, beta, and residual volatility receive higher scores. A complete factor score is the mean of both component z-scores; an incomplete factor is marked PARTIAL, and missing inputs are never replaced by zero.</p>
+          <p><strong>Where the issuer evidence comes from.</strong> Hover a point to see its raw component values, component z-scores, eligible peer counts, resulting factor scores, price coverage, IHSG reference date, and company-report as-of date. Price/risk inputs use the local daily snapshot; valuation and quality inputs use the local company-report snapshot.</p>
+        </div>
+      </section>
     </section>
 
     <section class="leaderboard-section" aria-labelledby="leaderboard-title">
